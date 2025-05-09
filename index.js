@@ -48,7 +48,11 @@ BgGray = "\x1b[100m"
 
 		fs.access('logs', err => {
 			if (err) return;
-			const txt = [firstArgument, ...otherArguments].map(a => typeof a === 'object' ? JSON.stringify(a, null, '\t') : a).join(' ');
+			const txt = [firstArgument, ...otherArguments].map(a => typeof a === 'object' ? (
+				a instanceof Error
+				? a.toString()
+				: JSON.stringify(a, null, '\t')
+			) : a).join(' ');
 
 			fs.appendFile(`logs/console-${methodName}.log`, `${(new Date).toLocaleString()} ${prefix}\n${txt}\n`, () => { });
 		});
@@ -66,6 +70,10 @@ Object.keys(colors).forEach(c => {
 		args.map(x => this.log('\x1b[' + colors[c] + 'm%s\x1b[0m', x));
 	};
 });
+
+Object.prototype.getKeyByValue = function (value) {
+	return Object.keys(this)[Object.values(this).indexOf(value)];
+};
 
 import fs from 'fs';
 import util from 'util';
@@ -112,12 +120,14 @@ const cacheDir = '_cache/',
 		return oMain;
 	},
 	toString = obj => {
-		if (obj instanceof Date) {
+		if (obj instanceof Error) {
+			obj = obj.toString() + obj.stack;
+		} else if (typeof obj === 'number') {
+			obj = obj.toString();
+		} else if (obj instanceof Date) {
 			obj = DT.format(obj, DT.DT_SQL);
 		} else if (typeof obj === 'object') {
 			obj = JSON.stringify(obj);
-		} else if (typeof obj === 'number') {
-			obj = obj.toString();
 		}
 
 		return obj;
@@ -235,7 +245,9 @@ export default {
 	match1: (rx, s) => (s.match(rx) || ['', ''])[1],
 	mt: msg => {
 		if (ts && typeof msg === 'string') {
-			console.log(`${msg} ${String((Date.now() - ts) / 1000).padEnd(5, '0')}`);
+			let rt = String((Date.now() - ts) / 1000);
+			console.log(`${msg} ${rt.padEnd(5, '0')}`);
+			return +rt;
 		}
 
 		if (typeof msg === 'object') {
@@ -249,6 +261,12 @@ export default {
 
 		ts = Date.now();
 	},
+	abbreviate: (title) => title.split(' ').map(w => w[0].toUpperCase()).join(''),
+	/**
+	 * 
+	 * @param {string} filename for fs 
+	 * @returns seconds
+	 */
 	fileAge: (file) => DT.format(fs.statSync(file).mtimeMs / 1000, 'mds', 'U'),
 	resolveObject(obj) {
 		let ps = [];
@@ -274,6 +292,49 @@ export default {
 		return Promise.all(ps).then(() => obj);
 	},
 	mkdir,
+	nf: (value, decimal, space, dot) => {
+		space === undefined && (space = ' ');
+		var frac = '',
+			zerocut = decimal < 0;
+
+		let minus = '';
+		if (value < 0) {
+			minus = '-';
+			value *= -1;
+		}
+
+		dot || (dot = '.');
+
+		value = value || '0';
+
+		if (decimal) { //есть дробная часть, нужно округлять c заданной точностью
+			decimal = Math.abs(decimal);
+			value = String(Math.round(+value * Math.pow(10, decimal)));
+			frac = value.slice(value.length - decimal);
+			if (frac.length && zerocut) {
+				frac = +('0.' + frac);
+				frac = frac ? dot + String(frac).slice(2) : '';
+			} else {
+				frac = dot + frac;
+			}
+			value = value.slice(0, value.length - decimal); // - (decimal && frac.length ? 0 : 1))
+		} else {
+			value = String(Math.round(+value));
+		}
+
+		if (space !== '') {
+			var a = value.split(''),
+				i = value.length;
+
+			while ((i -= 3) > 0) {
+				a.splice(i, 0, space);
+			}
+
+			value = a.join('');
+		}
+
+		return minus + (value || 0) + frac;
+	},
 	readDir: dir => {
 		mkdir(dir);
 		return fs.readdirSync(dir);
@@ -429,34 +490,41 @@ export default {
 		return time.split(':').reverse()
 			.reduce((p, c, i) => p += c * multier[i], 0);
 	},
-	writeJson: (obj, file = 'cash', path = './files/', format, append) => {
+	writeJson: (obj, file = 'cash', path = './', format, append) => {
 		path.endsWith('/') || (path += '/');
+		file.match(/\.json[^.]*/) || (file += '.json');
 		console.log(`writeJson to ` + path + file);
 		fs.existsSync(path) || fs.mkdirSync(path, { recursive: true });
 		return fs[append ? 'appendFileSync' : 'writeFileSync'](
-			path + file + '.json',
+			path + file,
 			format
 				? JSON.stringify(obj, null, '\t') + '\n'
 				: JSON.stringify(obj)
 		);
 	},
 	toString,
-	writeText: (obj, file = 'cash', path = './files/', format, append) => {
+	writeText: (obj, file = 'cash', path = './', format, append) => {
+		obj = toString(obj);
+
 		path.endsWith('/') || (path += '/');
 		console.log(`writeText to ` + path + file);
 		fs.existsSync(path) || fs.mkdirSync(path, { recursive: true });
 		return fs[append ? 'appendFileSync' : 'writeFileSync'](
 			path + file,
-			toString(obj) + '\n'
+			obj
 		);
 	},
-	readJson: (file = 'cash', path = './files/') => {
+	readJson: (file = 'cash', path = './') => {
 		path.endsWith('/') || (path += '/');
-		if (!fs.existsSync(path + file + '.json')) return null;
+		file.endsWith('.json') || (file += '.json');
+		if (!fs.existsSync(path + file)) {
+			console.yellow(`readJson not exist ` + file);
+			return null;
+		}
 		console.log(`readJson from ` + file);
-		return JSON.parse(fs.readFileSync(path + file + '.json', 'utf8'));
+		return JSON.parse(fs.readFileSync(path + file, 'utf8'));
 	},
-	readText: (file, path = './files/') => {
+	readText: (file, path = './') => {
 		if (!fs.existsSync(path + file)) return '';
 		console.log(`readText from ` + file);
 		return fs.readFileSync(path + file, 'utf8');
