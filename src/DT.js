@@ -87,7 +87,7 @@ export const DT = (() => {
 			// выдача только даты, если подразумевается только дата
 			format = input_dt.includes(':') || ['s', 'm', 'h'].includes(unit) ? _t.DT_SQL : _t.D_SQL;
 		}
-		let ms = +_t.format(input_dt, 'U');
+		let ms = +_t.format(input_dt, 'U') * 1000;
 
 		if (add) {
 			if (['M', 'Q', 'Y'].includes(unit)) {
@@ -317,7 +317,7 @@ export const DT = (() => {
 					f === 'y' && (d = String(d).slice(2));
 					break;
 				case 'U':
-					d = dt.getTime();
+					d = Math.floor(dt.getTime() / 1000);
 					break;
 				case 'H': case 'G': // case 'h': // 4 am
 					d = dt.getHours();

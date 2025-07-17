@@ -50,8 +50,8 @@ BgGray = "\x1b[100m"
 			if (err) return;
 			const txt = [firstArgument, ...otherArguments].map(a => typeof a === 'object' ? (
 				a instanceof Error
-				? a.toString()
-				: JSON.stringify(a, null, '\t')
+					? a.toString()
+					: JSON.stringify(a, null, '\t')
 			) : a).join(' ');
 
 			fs.appendFile(`logs/console-${methodName}.log`, `${(new Date).toLocaleString()} ${prefix}\n${txt}\n`, () => { });
@@ -75,12 +75,65 @@ Object.prototype.getKeyByValue = function (value) {
 	return Object.keys(this)[Object.values(this).indexOf(value)];
 };
 
+import crypto from 'crypto';
 import fs from 'fs';
 import util from 'util';
 import { DT } from './src/DT.js';
 
 let ts = 0;
 const cacheDir = '_cache/',
+	htmlEntites = [
+		// https://www.w3.org/wiki/Common_HTML_entities_used_for_typography
+		['&cent;', '¢'],
+		['&pound;', '£'],
+		['&sect;', '§'],
+		['&copy;', '©'],
+		['&reg;', '®'],
+		['&deg;', '°'],
+		['&plusmn;', '±'],
+		['&para;', '¶'],
+		['&middot;', '·'],
+		['&frac12;', '½'],
+		['&ndash;', '–'],
+		['&mdash;', '—'],
+		['&sbquo;', '‚'],
+		['&bdquo;', '„'],
+		['&dagger;', '†'],
+		['&bull;', '•'],
+		['&prime;', '′'],
+		['&Prime;', '″'],
+		['&euro;', '€'],
+		['&trade;', '™'],
+		['&asymp;', '≈'],
+		['&ne;', '≠'],
+		['&le;', '≤'],
+		['&ge;', '≥'],
+		['&nbsp;', ' '],
+		['&quot;', '"'],
+		['&apos;', '\''],
+		['&lt', '<'],
+		['&gt', '>'],
+		['&lang;', '<'],
+		['&rang;', '>'],
+		['&amp;', '&'],
+		['&prime;', "'"],
+		['&laquo;', '«'],
+		['&raquo;', '»'],
+		['&sim;', '~'],
+		['&#8764;', '∼'],
+		['&#43;', '+'],
+		['&ldquo;', '“'],
+		['&rdquo;', '”'],
+		['&minus;', '-'],
+		['&lowast;', '**'],
+		['&hellip;', '…'],
+		['&lsquo;', '‘'],
+		['&larr;', '←'],
+		['&uarr;', '↑'],
+		['&rarr;', '→'],
+		['&darr;', '↓'],
+		['&rsquo;', '’'],
+	],
 	deleteFolderRecursive = path => {
 		let files = [];
 		if (fs.existsSync(path)) {
@@ -97,6 +150,24 @@ const cacheDir = '_cache/',
 		} else {
 			console.log(`folder not exists: ${path}`);
 		}
+	},
+	eq = (v1, v2) => {
+		if (!v1 && !v2) {
+			return v1 === 0 && v2 === 0 || (v1 !== 0 && v2 !== 0);
+		}
+
+		if (Object.keys(v1).length != Object.keys(v2).length) return false;
+
+		for (const k1 in v1) {
+			if (typeof v1[k1] === 'object' && typeof v2[k1] === 'object') {
+				if (!eq(v1[k1], v2[k1])) return false;
+				continue;
+			}
+
+			if (v2[k1] === undefined || v1[k1] != v2[k1]) return false;
+		}
+
+		return true;
 	},
 	getKeyByValue = (obj, value) =>
 		Object.keys(obj)[Object.values(obj).indexOf(value)],
@@ -119,20 +190,72 @@ const cacheDir = '_cache/',
 
 		return oMain;
 	},
+	md5string = s => crypto.createHash('md5').update(s).digest('hex'),
 	toString = obj => {
-		if (obj instanceof Error) {
-			obj = obj.toString() + obj.stack;
-		} else if (typeof obj === 'number') {
-			obj = obj.toString();
-		} else if (obj instanceof Date) {
+		if (obj instanceof Date) {
 			obj = DT.format(obj, DT.DT_SQL);
 		} else if (typeof obj === 'object') {
 			obj = JSON.stringify(obj);
+		} else if (typeof obj === 'number') {
+			obj = obj.toString();
 		}
 
 		return obj;
 	},
-	isObject = s => s && typeof s === 'object' && s.length === undefined,
+	filterObject = (obj, checkerFunction) => {
+		for (let key in obj) {
+			if (obj.hasOwnProperty(key)) {
+				var value = obj[key];
+
+				if (Array.isArray(value)) {
+					value = value.map(v => filterObject(v, checkerFunction));
+					if (!value.length) {
+						delete obj[key];
+					}
+				} else if (isObject(value)) {
+					filterObject(value, checkerFunction);
+					// If the object becomes empty after deletion, remove the key
+					if (Object.keys(value).length === 0) {
+						delete obj[key];
+					}
+				} else {
+					// If the value does not satisfy the checkerFunction, delete the key
+					if (!checkerFunction(value)) {
+						delete obj[key];
+					}
+				}
+			}
+		}
+	},
+	pathsInObject = (obj, targetValue, currentPath = '') => {
+		let paths = [];
+
+		for (let key in obj) {
+			if (obj.hasOwnProperty(key)) {
+				const newPath = currentPath ? `${currentPath}.${key}` : key;
+
+				if (obj[key] === targetValue) {
+					paths.push(newPath);
+				} else if (typeof obj[key] === 'object' && obj[key] !== null) {
+					paths = paths.concat(pathsInObject(obj[key], targetValue, newPath));
+				}
+			}
+		}
+
+		return paths;
+	},
+	isObject = s => s && typeof s === 'object' && !Array.isArray(s),
+	objectUnion = (obj, newObj) => {
+		if (!isObject(newObj)) return;
+
+		for (let [k, v] of Object.entries(newObj)) {
+			if (obj[k] === undefined) {
+				obj[k] = v;
+			} else if (isObject(obj[k]) && isObject(v)) {
+				objectUnion(obj[k], v);
+			}
+		}
+	},
 	/**
 	 * @description node:fetch wrapper. Always resolves with the following object
 	 * @typedef {Object} httpResponse
@@ -209,6 +332,8 @@ export default {
 	DT,
 	deepAssign,
 	isObject,
+	md5string,
+	objectUnion,
 	newv: () => console.log(exec(`node -v`)),
 	deleteFolderRecursive,
 	sanitizeFileName,
@@ -224,23 +349,8 @@ export default {
 		}
 		return r.concat(Object.keys(o2).filter(k2 => o1[k2] === undefined));
 	},
-	eq: (v1, v2) => {
-		if (!v1 && !v2) {
-			return v1 === 0 && v2 === 0 || (v1 !== 0 && v2 !== 0);
-		}
 
-		if (Object.keys(v1).length != Object.keys(v2).length) return false;
-
-		for (const k1 in v1) {
-			if (isObject(v1[k1]) && isObject(v2[k1])) {
-				if (!eq(v1[k1], v2[k1])) return false;
-				continue;
-			}
-			if (v2[k1] === undefined || v1[k1] != v2[k1]) return false;
-		}
-
-		return true;
-	},
+	eq,
 	fetch: _fetch,
 	match1: (rx, s) => (s.match(rx) || ['', ''])[1],
 	mt: msg => {
@@ -291,6 +401,8 @@ export default {
 		resolveValues(obj);
 		return Promise.all(ps).then(() => obj);
 	},
+	filterObject,
+	pathsInObject,
 	mkdir,
 	nf: (value, decimal, space, dot) => {
 		space === undefined && (space = ' ');
@@ -344,7 +456,7 @@ export default {
 		runner.name = runner.surname;
 		runner.surname = n;
 	},
-	grabUrl: async (url, useCache, isBinary, options) => {
+	grabUrl: async (url, useCache, isBinary, options = {}) => {
 		// TODO:
 		// - title/filename Y.m.d-user-page.html
 		// - 
@@ -364,10 +476,10 @@ export default {
 				}
 			}, options));
 		} catch (e) {
-			throw new Error(e.config.url + ' ' + e.response.status + ' ' + e.response.statusText);
+			throw new Error(e);
 		}
 
-		if (r.statusCode >= 200 && r.statusMessage < 300) {
+		if (r.statusCode >= 200 && r.statusCode < 300) {
 			if (useCache) {
 				mkdir(cacheDir);
 				fs.writeFileSync(fileUrl, r.body);
@@ -418,66 +530,25 @@ export default {
 		if (!s) return '';
 
 		s = String(s);
-		const map = [
-			// https://www.w3.org/wiki/Common_HTML_entities_used_for_typography
-			['&cent;', '¢'],
-			['&pound;', '£'],
-			['&sect;', '§'],
-			['&copy;', '©'],
-			['&reg;', '®'],
-			['&deg;', '°'],
-			['&plusmn;', '±'],
-			['&para;', '¶'],
-			['&middot;', '·'],
-			['&frac12;', '½'],
-			['&ndash;', '–'],
-			['&mdash;', '—'],
-			['&sbquo;', '‚'],
-			['&bdquo;', '„'],
-			['&dagger;', '†'],
-			['&bull;', '•'],
-			['&prime;', '′'],
-			['&Prime;', '″'],
-			['&euro;', '€'],
-			['&trade;', '™'],
-			['&asymp;', '≈'],
-			['&ne;', '≠'],
-			['&le;', '≤'],
-			['&ge;', '≥'],
-			['&nbsp;', ' '],
-			['&quot;', '"'],
-			['&apos;', '\''],
-			['&lt', '<'],
-			['&gt', '>'],
-			['&lang;', '<'],
-			['&rang;', '>'],
-			['&amp;', '&'],
-			['&prime;', "'"],
-			['&laquo;', '«'],
-			['&raquo;', '»'],
-			['&sim;', '~'],
-			['&#8764;', '∼'],
-			['&#43;', '+'],
-			['&ldquo;', '“'],
-			['&rdquo;', '”'],
-			['&minus;', '-'],
-			['&lowast;', '**'],
-			['&hellip;', '…'],
-			['&lsquo;', '‘'],
-			['&larr;', '←'],
-			['&uarr;', '↑'],
-			['&rarr;', '→'],
-			['&darr;', '↓'],
-			['&rsquo;', '’'],
-		];
 
-		s = s.replace(/(<br\s*\/?>)/g, '\n');
-		s = s.replace(/(<\/(li|p)\s*>)/g, '$1\n');
-		s = s.replace(/<([a-zA-Z][^>]*|\/?[a-zA-Z]+[^>]*)>/g, '');
+		s = s.replace(/(<br\s*\/?>)/g, '\n')
+			.replace(/(<\/(li|p)\s*>)/g, '$1\n')
+			.replace(/<([a-zA-Z][^>]*|\/?[a-zA-Z]+[^>]*)>/g, '');
 
-		map.forEach(ft => (s = s.replace(new RegExp(ft[0], 'gi'), ft[1])));
+		htmlEntites.forEach(ft => (s = s.replace(new RegExp(ft[0], 'gi'), ft[1])));
 
 		return s;
+	},
+	escapeHTML: s => {
+		var map = {
+			'&': '&amp;',
+			'<': '&lt;',
+			'>': '&gt;',
+			'"': '&quot;',
+			"'": '&#039;'
+		};
+
+		return s.replace(/[&<>"']/g, (m) => map[m]);
 	},
 	millisecToHumanTime: sec => {
 		const h = Math.floor(sec / 3600000),
@@ -504,7 +575,13 @@ export default {
 	},
 	toString,
 	writeText: (obj, file = 'cash', path = './', format, append) => {
-		obj = toString(obj);
+		if (obj instanceof Date) {
+			obj = DT.format(obj, DT.DT_SQL);
+		} else if (typeof obj === 'object') {
+			obj = JSON.stringify(obj);
+		} else if (typeof obj === 'number') {
+			obj = obj.toString();
+		}
 
 		path.endsWith('/') || (path += '/');
 		console.log(`writeText to ` + path + file);
